@@ -19,6 +19,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Assistant Assist Intent -->
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <activity
@@ -28,6 +33,7 @@
             android:excludeFromRecents="true"
             android:exported="true" />
 
+        <!-- Main Voice Interaction Service -->
         <service
             android:name=".service.AstuteVoiceInteractionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
@@ -40,11 +46,24 @@
             </intent-filter>
         </service>
 
+        <!-- Voice Interaction Session Service -->
         <service
             android:name=".service.AstuteVoiceInteractionSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
 
+        <!-- Recognition Service (Required for Assistant Selector) -->
+        <service
+            android:name=".service.AstuteRecognitionService"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </service>
+
+        <!-- Accessibility Service -->
         <service
             android:name=".service.DeviceAutomationService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

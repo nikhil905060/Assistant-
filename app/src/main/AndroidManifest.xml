@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Google Speech Engine Recognition Intent Query -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:icon="@android:drawable/sym_def_app_icon"
@@ -19,7 +26,6 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Assistant Assist Intent -->
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -33,7 +39,6 @@
             android:excludeFromRecents="true"
             android:exported="true" />
 
-        <!-- Main Voice Interaction Service -->
         <service
             android:name=".service.AstuteVoiceInteractionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
@@ -46,13 +51,11 @@
             </intent-filter>
         </service>
 
-        <!-- Voice Interaction Session Service -->
         <service
             android:name=".service.AstuteVoiceInteractionSessionService"
             android:permission="android.permission.BIND_VOICE_INTERACTION"
             android:exported="true" />
 
-        <!-- Recognition Service (Required for Assistant Selector) -->
         <service
             android:name=".service.AstuteRecognitionService"
             android:permission="android.permission.BIND_RECOGNITION_SERVICE"
@@ -63,7 +66,6 @@
             </intent-filter>
         </service>
 
-        <!-- Accessibility Service -->
         <service
             android:name=".service.DeviceAutomationService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"

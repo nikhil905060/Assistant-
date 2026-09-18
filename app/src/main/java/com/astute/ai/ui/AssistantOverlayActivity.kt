@@ -1,6 +1,7 @@
 package com.astute.ai.ui
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -12,6 +13,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -25,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.astute.ai.network.GeminiClient
 import com.astute.ai.service.DeviceAutomationService
 import com.astute.ai.ui.components.PlasmaOrbView
 import kotlinx.coroutines.launch
@@ -34,27 +35,22 @@ import java.util.Locale
 class AssistantOverlayActivity : ComponentActivity() {
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var activeTranscriptState = mutableStateOf("Listening...")
-    private var executionStepState = mutableStateOf("Say something like 'Open YouTube'")
+    private var activeTranscriptState = mutableStateOf("Initializing...")
+    private var executionStepState = mutableStateOf("Tap the orb or speak 'Open YouTube'")
     private var isListeningState = mutableStateOf(false)
-
-    // Replace with your valid Gemini API Key for processing
-    private val geminiClient = GeminiClient(apiKey = "YOUR_GEMINI_API_KEY")
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            startListening()
+            setupAndStartRecognizer()
         } else {
-            activeTranscriptState.value = "Microphone permission denied."
+            activeTranscriptState.value = "Microphone permission required!"
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        initSpeechRecognizer()
 
         setContent {
             val transcript by remember { activeTranscriptState }
@@ -85,13 +81,15 @@ class AssistantOverlayActivity : ComponentActivity() {
                     Text(
                         text = transcript,
                         color = Color(0xFFE1BEE7),
-                        fontSize = 17.sp,
+                        fontSize = 18.sp,
                         textAlign = TextAlign.Center
                     )
                 }
 
                 Box(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .clickable { startListening() },
                     contentAlignment = Alignment.Center
                 ) {
                     PlasmaOrbView(isListening = isListening)
@@ -111,71 +109,100 @@ class AssistantOverlayActivity : ComponentActivity() {
                         textAlign = TextAlign.Center
                     )
                     Spacer(modifier = Modifier.height(26.dp))
-                    Button(
-                        onClick = { finish() },
-                        shape = CircleShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A))
-                    ) {
-                        Text("Close", color = Color.White)
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Button(
+                            onClick = { startListening() },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2))
+                        ) {
+                            Text("Retry Mic", color = Color.White)
+                        }
+                        Button(
+                            onClick = { finish() },
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF311B92))
+                        ) {
+                            Text("Close", color = Color.White)
+                        }
                     }
                 }
             }
         }
 
-        checkAndStartListening()
-    }
-
-    private fun checkAndStartListening() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            startListening()
+            setupAndStartRecognizer()
         } else {
             requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
-    private fun initSpeechRecognizer() {
-        if (SpeechRecognizer.isRecognitionAvailable(this)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
-                setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        isListeningState.value = true
-                        activeTranscriptState.value = "Listening..."
-                    }
-
-                    override fun onBeginningOfSpeech() {}
-                    override fun onRmsChanged(rmsdB: Float) {}
-                    override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {
-                        isListeningState.value = false
-                        activeTranscriptState.value = "Processing command..."
-                    }
-
-                    override fun onError(error: Int) {
-                        isListeningState.value = false
-                        activeTranscriptState.value = "Error listening (Code: $error). Tap to retry."
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!matches.isNullOrEmpty()) {
-                            val recognizedText = matches[0]
-                            activeTranscriptState.value = "\"$recognizedText\""
-                            handleSpokenCommand(recognizedText)
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) {
-                        val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                        if (!partial.isNullOrEmpty()) {
-                            activeTranscriptState.value = partial[0]
-                        }
-                    }
-
-                    override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
+    private fun setupAndStartRecognizer() {
+        try {
+            speechRecognizer?.destroy()
+            
+            // Explicitly bind to Google Speech Recognition Service to avoid OEM blocking
+            val googleService = ComponentName("com.google.android.googlequicksearchbox", "com.google.android.voicesearch.serviceapi.GoogleRecognitionService")
+            speechRecognizer = if (SpeechRecognizer.isRecognitionAvailable(this)) {
+                try {
+                    SpeechRecognizer.createSpeechRecognizer(this, googleService)
+                } catch (e: Exception) {
+                    SpeechRecognizer.createSpeechRecognizer(this)
+                }
+            } else {
+                SpeechRecognizer.createSpeechRecognizer(this)
             }
-        } else {
-            activeTranscriptState.value = "Speech Recognition not available on device"
+
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    isListeningState.value = true
+                    activeTranscriptState.value = "Listening... Speak now!"
+                }
+
+                override fun onBeginningOfSpeech() {
+                    activeTranscriptState.value = "Hearing you..."
+                }
+
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+
+                override fun onEndOfSpeech() {
+                    isListeningState.value = false
+                    activeTranscriptState.value = "Analyzing..."
+                }
+
+                override fun onError(error: Int) {
+                    isListeningState.value = false
+                    activeTranscriptState.value = when (error) {
+                        SpeechRecognizer.ERROR_NO_MATCH -> "Didn't catch that. Tap orb to speak."
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected. Tap to retry."
+                        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission missing."
+                        else -> "Mic status (Code: $error). Tap Retry."
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!matches.isNullOrEmpty()) {
+                        val spokenText = matches[0]
+                        activeTranscriptState.value = "\"$spokenText\""
+                        handleCommand(spokenText)
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val partial = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    if (!partial.isNullOrEmpty()) {
+                        activeTranscriptState.value = partial[0]
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) {}
+            })
+
+            startListening()
+        } catch (e: Exception) {
+            activeTranscriptState.value = "Recognizer init failed: ${e.message}"
         }
     }
 
@@ -184,34 +211,29 @@ class AssistantOverlayActivity : ComponentActivity() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
         }
         speechRecognizer?.startListening(intent)
     }
 
-    private fun handleSpokenCommand(command: String) {
+    private fun handleCommand(command: String) {
         val lower = command.lowercase(Locale.ROOT)
-        executionStepState.value = "Executing: $command"
+        executionStepState.value = "Action triggered: $command"
 
-        // Basic local command routing
         when {
             lower.contains("youtube") -> {
                 executionStepState.value = "Opening YouTube..."
                 DeviceAutomationService.instance?.launchApp("com.google.android.youtube")
+                finish()
             }
             lower.contains("settings") -> {
                 executionStepState.value = "Opening Settings..."
                 DeviceAutomationService.instance?.launchApp("com.android.settings")
+                finish()
             }
             else -> {
-                // Send command to Gemini API for complex intent breakdown
-                lifecycleScope.launch {
-                    try {
-                        val response = geminiClient.analyzeCommand(command)
-                        executionStepState.value = "AI Response received"
-                    } catch (e: Exception) {
-                        executionStepState.value = "Execution failed: ${e.localizedMessage}"
-                    }
-                }
+                executionStepState.value = "Executing automation: $command"
             }
         }
     }

@@ -1,10 +1,11 @@
 package com.astute.ai.ui
 
 import android.Manifest
-import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -26,16 +27,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
 import com.astute.ai.service.DeviceAutomationService
 import com.astute.ai.ui.components.PlasmaOrbView
-import kotlinx.coroutines.launch
 import java.util.Locale
 
 class AssistantOverlayActivity : ComponentActivity() {
 
     private var speechRecognizer: SpeechRecognizer? = null
-    private var activeTranscriptState = mutableStateOf("Initializing...")
+    private var activeTranscriptState = mutableStateOf("Ready to listen")
     private var executionStepState = mutableStateOf("Tap the orb or speak 'Open YouTube'")
     private var isListeningState = mutableStateOf(false)
 
@@ -43,7 +42,7 @@ class AssistantOverlayActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (isGranted) {
-            setupAndStartRecognizer()
+            initAndListen()
         } else {
             activeTranscriptState.value = "Microphone permission required!"
         }
@@ -89,7 +88,7 @@ class AssistantOverlayActivity : ComponentActivity() {
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .clickable { startListening() },
+                        .clickable { initAndListen() },
                     contentAlignment = Alignment.Center
                 ) {
                     PlasmaOrbView(isListening = isListening)
@@ -111,7 +110,7 @@ class AssistantOverlayActivity : ComponentActivity() {
                     Spacer(modifier = Modifier.height(26.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Button(
-                            onClick = { startListening() },
+                            onClick = { initAndListen() },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7B1FA2))
                         ) {
@@ -130,28 +129,25 @@ class AssistantOverlayActivity : ComponentActivity() {
         }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            setupAndStartRecognizer()
+            Handler(Looper.getMainLooper()).postDelayed({
+                initAndListen()
+            }, 300)
         } else {
             requestPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
-    private fun setupAndStartRecognizer() {
+    private fun initAndListen() {
         try {
             speechRecognizer?.destroy()
-            
-            // Explicitly bind to Google Speech Recognition Service to avoid OEM blocking
-            val googleService = ComponentName("com.google.android.googlequicksearchbox", "com.google.android.voicesearch.serviceapi.GoogleRecognitionService")
-            speechRecognizer = if (SpeechRecognizer.isRecognitionAvailable(this)) {
-                try {
-                    SpeechRecognizer.createSpeechRecognizer(this, googleService)
-                } catch (e: Exception) {
-                    SpeechRecognizer.createSpeechRecognizer(this)
-                }
-            } else {
-                SpeechRecognizer.createSpeechRecognizer(this)
+            speechRecognizer = null
+
+            if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                activeTranscriptState.value = "Speech recognition unavailable"
+                return
             }
 
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
             speechRecognizer?.setRecognitionListener(object : RecognitionListener {
                 override fun onReadyForSpeech(params: Bundle?) {
                     isListeningState.value = true
@@ -167,17 +163,15 @@ class AssistantOverlayActivity : ComponentActivity() {
 
                 override fun onEndOfSpeech() {
                     isListeningState.value = false
-                    activeTranscriptState.value = "Analyzing..."
+                    activeTranscriptState.value = "Processing..."
                 }
 
                 override fun onError(error: Int) {
                     isListeningState.value = false
                     activeTranscriptState.value = when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "Didn't catch that. Tap orb to speak."
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No speech detected. Tap to retry."
-                        SpeechRecognizer.ERROR_AUDIO -> "Audio recording error."
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Mic permission missing."
-                        else -> "Mic status (Code: $error). Tap Retry."
+                        SpeechRecognizer.ERROR_NO_MATCH -> "Didn't catch that. Tap orb to try again."
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Timeout. Tap orb to speak."
+                        else -> "Mic status ($error). Tap Retry."
                     }
                 }
 
@@ -200,26 +194,20 @@ class AssistantOverlayActivity : ComponentActivity() {
                 override fun onEvent(eventType: Int, params: Bundle?) {}
             })
 
-            startListening()
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+            }
+            speechRecognizer?.startListening(intent)
         } catch (e: Exception) {
-            activeTranscriptState.value = "Recognizer init failed: ${e.message}"
+            activeTranscriptState.value = "Error: ${e.message}"
         }
-    }
-
-    private fun startListening() {
-        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-            putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
-        }
-        speechRecognizer?.startListening(intent)
     }
 
     private fun handleCommand(command: String) {
         val lower = command.lowercase(Locale.ROOT)
-        executionStepState.value = "Action triggered: $command"
+        executionStepState.value = "Running: $command"
 
         when {
             lower.contains("youtube") -> {
@@ -233,7 +221,7 @@ class AssistantOverlayActivity : ComponentActivity() {
                 finish()
             }
             else -> {
-                executionStepState.value = "Executing automation: $command"
+                executionStepState.value = "Command: $command"
             }
         }
     }
